@@ -7,8 +7,8 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "2.1"
-    CURRENT_PROJECT_VERSION: "3"
+    MARKETING_VERSION: "2.2"
+    CURRENT_PROJECT_VERSION: "4"
     SWIFT_VERSION: "5.0"
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
@@ -34,8 +34,8 @@ targets:
       path: ScanLite/Info.plist
       properties:
         CFBundleDisplayName: 扫描小工具
-        CFBundleShortVersionString: "2.1"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "2.2"
+        CFBundleVersion: "4"
         CFBundleIconName: AppIcon
         UILaunchScreen: {}
         UIApplicationSceneManifest:

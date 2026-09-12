@@ -2,9 +2,22 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
-/// 给 sheet(item:) 用的轻量包装，避免把整页数据复制出去导致界面不刷新
-struct PageRef: Identifiable {
-    let id: UUID
+/// 详情页弹出的几种面板。合并到一个 sheet 上，
+/// 避免同一层级叠多个 sheet 导致只有最后一个生效。
+enum DetailSheet: Identifiable {
+    case export
+    case ocr
+    case viewer(UUID)
+    case appendToCompilation
+
+    var id: String {
+        switch self {
+        case .export: return "export"
+        case .ocr: return "ocr"
+        case .viewer(let uuid): return "viewer-" + uuid.uuidString
+        case .appendToCompilation: return "append"
+        }
+    }
 }
 
 /// 文档详情：页面缩略图列表 + 拖动排序 + 删除 + 继续追加页面 + 导出
@@ -17,12 +30,10 @@ struct DocumentDetailView: View {
     @State private var showCamera = false
     @State private var showPhotoPicker = false
     @State private var photoItems: [PhotosPickerItem] = []
-    @State private var showExport = false
-    @State private var viewerRef: PageRef?
+    @State private var activeSheet: DetailSheet?
 
     @State private var busyText: String?
     @State private var ocrText: String?
-    @State private var showOCR = false
 
     @State private var showRename = false
     @State private var renameText = ""
@@ -61,14 +72,17 @@ struct DocumentDetailView: View {
             guard !items.isEmpty else { return }
             importPhotos(items)
         }
-        .sheet(isPresented: $showExport) {
-            ExportSheet(documentID: documentID)
-        }
-        .sheet(isPresented: $showOCR) {
-            ocrSheet
-        }
-        .sheet(item: $viewerRef) { ref in
-            PageViewerView(documentID: documentID, pageID: ref.id)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .export:
+                ExportSheet(documentID: documentID)
+            case .ocr:
+                ocrSheet
+            case .viewer(let pageID):
+                PageViewerView(documentID: documentID, pageID: pageID)
+            case .appendToCompilation:
+                AddToCompilationSheet(documentIDs: [documentID])
+            }
         }
         .alert("重命名文档", isPresented: $showRename) {
             TextField("文档名称", text: $renameText)
@@ -84,7 +98,7 @@ struct DocumentDetailView: View {
             Section {
                 ForEach(Array(document.pages.enumerated()), id: \.element.id) { index, page in
                     Button {
-                        viewerRef = PageRef(id: page.id)
+                        activeSheet = .viewer(page.id)
                     } label: {
                         pageRow(index: index, page: page, document: document)
                     }
@@ -155,7 +169,7 @@ struct DocumentDetailView: View {
             Spacer()
 
             Button {
-                showExport = true
+                activeSheet = .export
             } label: {
                 Label("导出", systemImage: "square.and.arrow.up")
             }
@@ -193,7 +207,13 @@ struct DocumentDetailView: View {
                 }
 
                 Button {
-                    showExport = true
+                    activeSheet = .appendToCompilation
+                } label: {
+                    Label("加入文字汇总", systemImage: "text.alignleft")
+                }
+
+                Button {
+                    activeSheet = .export
                 } label: {
                     Label("导出 PDF", systemImage: "doc.richtext")
                 }
@@ -240,7 +260,7 @@ struct DocumentDetailView: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("完成") { showOCR = false }
+                    Button("完成") { activeSheet = nil }
                 }
                 ToolbarItem(placement: .bottomBar) {
                     if let ocrText, !ocrText.isEmpty {
@@ -334,7 +354,7 @@ struct DocumentDetailView: View {
                 busyText = nil
                 store.saveOCRText(result, for: documentID)
                 ocrText = result.isEmpty ? "没有识别到文字" : result
-                showOCR = true
+                activeSheet = .ocr
             }
         }
     }

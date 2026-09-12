@@ -1,4 +1,4 @@
-# ScanLite · 自用扫描 App（v2.1）
+# ScanLite · 自用扫描 App（v2.2）
 
 > **完全没做过的话，先看 [新手安装指南.md](新手安装指南.md)** —— 里面有每一步的点击位置、界面说明和报错处理。
 
@@ -41,6 +41,26 @@
 ### 文字识别
 - 整份文档批量 OCR（中英），结果可选中、可复制、可分享
 
+### 文字汇总（把多份文件的文字拼成一份稿子）
+这是给「一次要处理一批纸质文件」的场景做的：扫一份、出文字，再扫下一份，
+新文字自动接在前一份后面，最后导出成一个文件。
+
+- **追加方式三种**：相机扫一份直接追加 / 从已有扫描件里挑（可多选，点击顺序即排列顺序）/ 手动录入一段
+- **自动识别**：追加时如果某份还没识别过文字，会自动先跑 OCR，不用手动点
+- **顺序可调**：拖动排序、左滑删除单份、点进去直接改错字
+- **导出格式四种**：
+  | 格式 | 说明 |
+  |---|---|
+  | 纯文本 `.txt` | 最通用 |
+  | Markdown `.md` | 带标题层级，适合笔记软件 |
+  | **Word `.docx`** | 真正的 OOXML 文档，可在 Word / WPS 里继续排版 |
+  | **PDF（文字版）** | A4 矢量排版，文字可选中、可复制、可全文搜索，体积只有几十 KB |
+- **排版开关**：开头写名称和字数统计、每份前面写小标题、条目之间加分隔线、PDF 页码
+
+> `.docx` 是用纯 Swift 手写的 ZIP 结构（iOS 没有公开的 zip 写入 API），
+> 字节布局已用标准解压器逐项校验过。**不依赖样式表**，Word / WPS / Pages / Google Docs 都能打开。
+> PDF 走 CoreText 类型排版器，中日韩断行由系统处理，不会出现英文按字母乱断。
+
 ---
 
 ## 工程结构
@@ -49,23 +69,27 @@
 scan-app/
 ├── project.yml                    # XcodeGen 工程定义（Windows 上只改这个）
 ├── ScanLite/
-│   ├── ScanLiteApp.swift          # App 入口
+│   ├── ScanLiteApp.swift          # App 入口 + 底部两个页签
 │   ├── Assets.xcassets/
 │   │   └── AppIcon.appiconset/
 │   │       └── AppIcon-1024.png   # App 图标（1024×1024，无 alpha）
 │   ├── Core/
 │   │   ├── Models.swift           # ScanDocument / ScanPage / PageFilter
-│   │   ├── DocumentStore.swift    # 沙盒读写、增删改查、缓存、导出
+│   │   ├── TextCompilation.swift  # 文字汇总模型 + 纯文本/Markdown 生成
+│   │   ├── DocumentStore.swift    # 沙盒读写、增删改查、缓存、识别、导出
 │   │   ├── ImageTools.swift       # 方向矫正、缩放、旋转、滤镜、缩略图
 │   │   ├── DocumentScanner.swift  # Vision 边缘检测 + 透视校正 + 增强
 │   │   ├── TextRecognizer.swift   # Vision 端侧 OCR（中英，含行坐标）
+│   │   ├── DocxWriter.swift       # 手写 ZIP + OOXML，生成 Word 文档
+│   │   ├── TextPDFWriter.swift    # CoreText 排版，生成文字版 A4 PDF
 │   │   └── PDFBuilder.swift       # A4 合成 / 水印 / 页码 / 签名 / 加密 / 文字层 + PDF 导入
 │   └── Views/
-│       ├── LibraryView.swift      # 文件库首页
+│       ├── LibraryView.swift      # 扫描件库首页
 │       ├── DocumentDetailView.swift # 页列表、排序、OCR
+│       ├── CompilationViews.swift # 文字汇总：列表 / 编辑 / 挑文档 / 导出
 │       ├── PageViewerView.swift   # 单页查看与编辑
 │       ├── ScannerViews.swift     # 系统文档扫描器封装
-│       ├── ExportSheet.swift      # 导出设置
+│       ├── ExportSheet.swift      # 扫描件导出设置
 │       └── SignaturePadView.swift # 手写签名（PencilKit）
 ├── tools/
 │   └── make_app_icon.py           # 图标生成脚本（纯标准库，改颜色后重跑即可）
@@ -76,7 +100,8 @@ scan-app/
 所以你完全不需要 Mac，也不需要手写 Xcode 工程文件。
 
 **技术栈**：SwiftUI + Vision（边缘检测 / OCR）+ VisionKit（文档扫描器）+ Core Image（滤镜）
-+ Core Graphics（PDF 生成与加密）+ PDFKit（PDF 导入）+ PencilKit（签名）。
++ Core Graphics（PDF 生成与加密）+ CoreText（文字版 PDF 排版）+ PDFKit（PDF 导入）
++ PencilKit（签名）+ 手写 ZIP/OOXML（Word 导出）。
 全部是苹果原生框架，零第三方依赖，零服务器成本。
 
 ---
@@ -166,5 +191,18 @@ iOS 会缓存 App 图标。先长按图标删除 App，再重新装一次就正�
   或在 `tools/make_app_icon.py` 里改配色后重跑脚本。
 
 **Q：图标为什么是空白的**
-Xcode 只会使用 `ASSETCATALOG_COMPILER_APPICON_NAME` 指定名字的图标资源集。
+Xcode 只会使用 `ASSETCATALOG_COMPILER_APPICON_NAME` 指定名字的图标集。
 没有这个设置、或资源集里没有 1024×1024 的图，iOS 就显示系统默认的灰白方块。
+
+**Q：导出的 Word 打不开 / 提示文件损坏**
+`.docx` 是手工拼的 ZIP 包，最怕正文里混进 XML 不允许的控制字符。
+代码里已经做了过滤（只保留 0x09 / 0x0A / 0x0D 和正常字符范围）并对 `& < > " '` 转义。
+如果还是打不开，换成 PDF 或纯文本导出，然后把内容发我看看。
+
+**Q：文字汇总导出后顺序不对**
+导出顺序 = 汇总页里条目的排列顺序。
+从「扫描件」页多选追加时，顺序就是你点选的先后；想调整就进汇总页点右上角「编辑」拖动。
+
+**Q：同一份文件想重新识别一遍**
+在汇总页长按那一条 → 「重新识别并追加一份」；
+或者进「扫描件」页打开该文档 → 「识别文字」刷新缓存后再追加。

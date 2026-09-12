@@ -27,6 +27,9 @@ struct LibraryView: View {
     @State private var showMerge = false
     @State private var mergeName = ""
 
+    @State private var showAppend = false
+    @State private var appendTargets: [UUID] = []
+
     enum SortMode: String, CaseIterable, Identifiable {
         case dateDesc
         case dateAsc
@@ -60,7 +63,7 @@ struct LibraryView: View {
             .environment(\.editMode, $editMode)
             .overlay(alignment: .bottom) { toastView }
             .overlay { busyView }
-            .onAppear { store.load() }
+            .onAppear { store.loadIfNeeded() }
         }
         .fullScreenCover(isPresented: $showCamera) {
             DocumentCameraView { images in
@@ -96,6 +99,17 @@ struct LibraryView: View {
             Button("合并") { performMerge() }
         } message: {
             Text("把选中的 \(selection.count) 份文档按列表顺序拼成一份新文档")
+        }
+        .sheet(isPresented: $showAppend) {
+            AddToCompilationSheet(documentIDs: appendTargets) { added, emptyCount in
+                if added == 0 {
+                    showToast("没有可追加的内容")
+                } else if emptyCount > 0 {
+                    showToast("已加入汇总：\(added) 份，其中 \(emptyCount) 份没识别到文字")
+                } else {
+                    showToast("已加入文字汇总：\(added) 份")
+                }
+            }
         }
     }
 
@@ -154,6 +168,12 @@ struct LibraryView: View {
                         showToast("已复制一份")
                     } label: {
                         Label("复制一份", systemImage: "doc.on.doc")
+                    }
+                    Button {
+                        appendTargets = [document.id]
+                        showAppend = true
+                    } label: {
+                        Label("加入文字汇总", systemImage: "text.alignleft")
                     }
                     Button(role: .destructive) {
                         store.delete(documentID: document.id)
@@ -272,13 +292,24 @@ struct LibraryView: View {
 
         ToolbarItem(placement: .bottomBar) {
             if editMode.isEditing && !store.documents.isEmpty {
-                Button {
-                    mergeName = "合并文档 " + Self.dateText(Date())
-                    showMerge = true
-                } label: {
-                    Text(selection.count >= 2 ? "合并选中的 \(selection.count) 份" : "至少选两份才能合并")
+                HStack(spacing: 16) {
+                    Button {
+                        beginAppend()
+                    } label: {
+                        Text("加入汇总")
+                    }
+                    .disabled(selection.isEmpty)
+
+                    Spacer()
+
+                    Button {
+                        mergeName = "合并文档 " + Self.dateText(Date())
+                        showMerge = true
+                    } label: {
+                        Text(selection.count >= 2 ? "合并 \(selection.count) 份" : "合并")
+                    }
+                    .disabled(selection.count < 2)
                 }
-                .disabled(selection.count < 2)
             }
         }
     }
@@ -404,6 +435,14 @@ struct LibraryView: View {
         selection.removeAll()
         editMode = .inactive
         showToast("已合并 \(ordered.count) 份文档")
+    }
+
+    /// 选中的文档按列表当前顺序取出，这个顺序就是追加到汇总里的顺序
+    private func beginAppend() {
+        let ordered = filteredDocuments.map { $0.id }.filter { selection.contains($0) }
+        guard !ordered.isEmpty else { return }
+        appendTargets = ordered
+        showAppend = true
     }
 
     static func dateText(_ date: Date) -> String {

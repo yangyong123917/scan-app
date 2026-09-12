@@ -7,19 +7,23 @@ import UIKit
 /// ```
 /// ScanLite/
 ///  ├── documents.json          文档索引
+///  ├── compilations.json       文字汇总索引
 ///  ├── signature.png           保存的手写签名
 ///  ├── Docs/<文档ID>/pages/<页ID>.jpg
-///  └── Exports/xxx.pdf         导出的 PDF
+///  └── Exports/xxx.pdf         导出的文件
 /// ```
 final class DocumentStore: ObservableObject {
 
     static let shared = DocumentStore()
 
     @Published private(set) var documents: [ScanDocument] = []
+    /// 文字汇总：把多份文档的识别结果按顺序排成一份稿子
+    @Published private(set) var compilations: [TextCompilation] = []
 
     private let fileManager = FileManager.default
     private let thumbnailCache = NSCache<NSString, UIImage>()
     private let renderCache = NSCache<NSString, UIImage>()
+    private var didLoad = false
 
     private lazy var baseURL: URL = {
         let root = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -29,6 +33,7 @@ final class DocumentStore: ObservableObject {
     private var docsURL: URL { baseURL.appendingPathComponent("Docs", isDirectory: true) }
     private var exportsURL: URL { baseURL.appendingPathComponent("Exports", isDirectory: true) }
     private var indexURL: URL { baseURL.appendingPathComponent("documents.json") }
+    private var compilationsURL: URL { baseURL.appendingPathComponent("compilations.json") }
     private var signatureURL: URL { baseURL.appendingPathComponent("signature.png") }
 
     private init() {
@@ -61,12 +66,27 @@ final class DocumentStore: ObservableObject {
     // MARK: - 索引
 
     func load() {
-        guard let data = try? Data(contentsOf: indexURL),
-              let list = try? JSONDecoder().decode([ScanDocument].self, from: data) else {
+        if let data = try? Data(contentsOf: indexURL),
+           let list = try? JSONDecoder().decode([ScanDocument].self, from: data) {
+            documents = list.sorted { $0.updatedAt > $1.updatedAt }
+        } else {
             documents = []
-            return
         }
-        documents = list.sorted { $0.updatedAt > $1.updatedAt }
+
+        if let data = try? Data(contentsOf: compilationsURL),
+           let list = try? JSONDecoder().decode([TextCompilation].self, from: data) {
+            compilations = list.sorted { $0.updatedAt > $1.updatedAt }
+        } else {
+            compilations = []
+        }
+
+        didLoad = true
+    }
+
+    /// 只在第一次进界面时读盘，避免来回切页签反复解析 JSON
+    func loadIfNeeded() {
+        guard !didLoad else { return }
+        load()
     }
 
     private func persist() {
@@ -265,6 +285,168 @@ final class DocumentStore: ObservableObject {
         persist()
     }
 
+    // MARK: - 文字汇总
+
+    func compilation(id: UUID) -> TextCompilation? {
+        compilations.first { $0.id == id }
+    }
+
+    private func persistCompilations() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        guard let data = try? encoder.encode(compilations) else { return }
+        try? data.write(to: compilationsURL, options: .atomic)
+    }
+
+    @discardableResult
+    func createCompilation(name: String? = nil, items: [CompilationItem] = []) -> TextCompilation {
+        var compilation = TextCompilation(name: name ?? Self.defaultCompilationName())
+        compilation.items = items
+        compilations.insert(compilation, at: 0)
+        persistCompilations()
+        return compilation
+    }
+
+    func renameCompilation(id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = compilations.firstIndex(where: { $0.id == id }) else { return }
+        compilations[index].name = trimmed
+        compilations[index].updatedAt = Date()
+        persistCompilations()
+    }
+
+    func deleteCompilation(id: UUID) {
+        compilations.removeAll { $0.id == id }
+        persistCompilations()
+    }
+
+    func updateCompilation(_ compilation: TextCompilation) {
+        guard let index = compilations.firstIndex(where: { $0.id == compilation.id }) else { return }
+        var updated = compilation
+        updated.updatedAt = Date()
+        compilations[index] = updated
+        persistCompilations()
+    }
+
+    /// 追加条目到汇总末尾 —— 这就是「下一份排在前一份后面」的实现
+    func addItems(_ items: [CompilationItem], to compilationID: UUID) {
+        guard !items.isEmpty,
+              let index = compilations.firstIndex(where: { $0.id == compilationID }) else { return }
+        compilations[index].items.append(contentsOf: items)
+        compilations[index].updatedAt = Date()
+        persistCompilations()
+    }
+
+    func removeItem(id: UUID, from compilationID: UUID) {
+        guard let index = compilations.firstIndex(where: { $0.id == compilationID }) else { return }
+        compilations[index].items.removeAll { $0.id == id }
+        compilations[index].updatedAt = Date()
+        persistCompilations()
+    }
+
+    func moveItems(from offsets: IndexSet, to destination: Int, in compilationID: UUID) {
+        guard let index = compilations.firstIndex(where: { $0.id == compilationID }) else { return }
+        compilations[index].items.move(fromOffsets: offsets, toOffset: destination)
+        compilations[index].updatedAt = Date()
+        persistCompilations()
+    }
+
+    func updateItem(id: UUID, in compilationID: UUID, title: String, body: String) {
+        guard let index = compilations.firstIndex(where: { $0.id == compilationID }),
+              let itemIndex = compilations[index].items.firstIndex(where: { $0.id == id }) else { return }
+        compilations[index].items[itemIndex].title = title
+        compilations[index].items[itemIndex].body = body
+        compilations[index].updatedAt = Date()
+        persistCompilations()
+    }
+
+    // MARK: - 识别与追加
+
+    /// 纯计算：只读磁盘上的图片做 OCR，不碰任何界面状态，可以放心在后台线程调用。
+    /// 页数多于 1 时会在每页前面留一行页码标记，方便在汇总里分辨页界。
+    func recognize(pages: [ScanPage], in documentID: UUID) -> String {
+        var blocks: [String] = []
+        for (index, page) in pages.enumerated() {
+            guard let image = renderedImageUncached(for: page, in: documentID) else { continue }
+            let text = TextRecognizer.recognize(in: image)
+            if !text.isEmpty {
+                blocks.append("──── 第 \(index + 1) 页 ────\n\(text)")
+            }
+        }
+        return blocks.joined(separator: "\n\n")
+    }
+
+    /// 把若干份文档按顺序追加到汇总末尾。
+    ///
+    /// 线程安排：先在主线程把文档信息取成快照，再把识别丢到后台，
+    /// 最后统一回主线程写盘 —— 全程不会在后台线程改 `@Published` 状态。
+    /// 文档已经有缓存文字时直接复用，只有没识别过（或指定强制重识别）才现算。
+    func appendDocuments(_ documentIDs: [UUID],
+                         to compilationID: UUID,
+                         refreshOCR: Bool = false,
+                         progress: ((Int, Int, String) -> Void)? = nil,
+                         completion: @escaping (Int, Int) -> Void) {
+
+        struct Snapshot {
+            let id: UUID
+            let name: String
+            let pages: [ScanPage]
+            let cached: String
+        }
+
+        let snapshots: [Snapshot] = documentIDs.compactMap { id in
+            guard let document = document(id: id) else { return nil }
+            return Snapshot(id: id, name: document.name, pages: document.pages, cached: document.ocrText)
+        }
+
+        guard !snapshots.isEmpty else {
+            completion(0, 0)
+            return
+        }
+
+        let total = snapshots.count
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var texts: [String] = []
+            var emptyCount = 0
+
+            for (offset, snapshot) in snapshots.enumerated() {
+                var text = snapshot.cached
+                if text.isEmpty || refreshOCR {
+                    DispatchQueue.main.async {
+                        progress?(offset + 1, total, "正在识别「\(snapshot.name)」")
+                    }
+                    text = self.recognize(pages: snapshot.pages, in: snapshot.id)
+                }
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    emptyCount += 1
+                }
+                texts.append(text)
+            }
+
+            DispatchQueue.main.async {
+                var items: [CompilationItem] = []
+
+                for (snapshot, text) in zip(snapshots, texts) {
+                    if let index = self.documents.firstIndex(where: { $0.id == snapshot.id }) {
+                        self.documents[index].ocrText = text
+                    }
+                    let title = snapshot.pages.count > 1
+                        ? "\(snapshot.name)（\(snapshot.pages.count) 页）"
+                        : snapshot.name
+                    items.append(CompilationItem(title: title,
+                                                 body: text,
+                                                 sourceDocumentID: snapshot.id))
+                }
+
+                self.persist()
+                self.addItems(items, to: compilationID)
+                completion(items.count, emptyCount)
+            }
+        }
+    }
+
     // MARK: - 导出
 
     /// 把若干份文档的内容按顺序导成一个 PDF 文件
@@ -293,15 +475,58 @@ final class DocumentStore: ObservableObject {
         }
 
         guard let data else { return nil }
-        return writeExport(data, name: name)
+        return writeExport(data, name: name, fileExtension: "pdf")
     }
 
-    private func writeExport(_ data: Data, name: String) -> URL? {
+    /// 把文字汇总导出成一个文件：纯文本 / Markdown / Word / PDF
+    func exportCompilation(id: UUID,
+                           format: CompilationFormat,
+                           options: CompilationExportOptions,
+                           fileName: String,
+                           progress: ((Int, Int) -> Void)? = nil) -> URL? {
+
+        guard let compilation = compilation(id: id), !compilation.isEmpty else { return nil }
+
+        let safeName = CompilationTextBuilder.safeFileName(fileName, fallback: compilation.name)
+        let subtitle = options.includeHeader ? CompilationTextBuilder.subtitle(compilation) : ""
+
+        switch format {
+        case .text:
+            let text = CompilationTextBuilder.plainText(compilation, options: options)
+            return writeExport(Data(text.utf8), name: safeName, fileExtension: format.fileExtension)
+
+        case .markdown:
+            let text = CompilationTextBuilder.markdown(compilation, options: options)
+            return writeExport(Data(text.utf8), name: safeName, fileExtension: format.fileExtension)
+
+        case .word:
+            let sections = CompilationTextBuilder.sections(compilation, options: options)
+            guard let data = DocxWriter.build(title: compilation.name,
+                                              subtitle: subtitle,
+                                              sections: sections) else { return nil }
+            return writeExport(data, name: safeName, fileExtension: format.fileExtension)
+
+        case .pdf:
+            let sections = CompilationTextBuilder.sections(compilation, options: options)
+            guard let data = TextPDFWriter.build(title: compilation.name,
+                                                 subtitle: subtitle,
+                                                 sections: sections,
+                                                 showPageNumbers: options.showPageNumbers,
+                                                 progress: progress) else { return nil }
+            return writeExport(data, name: safeName, fileExtension: format.fileExtension)
+        }
+    }
+
+    private func writeExport(_ data: Data, name: String, fileExtension: String) -> URL? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let safeName = (trimmed.isEmpty ? Self.defaultName() : trimmed)
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        let url = exportsURL.appendingPathComponent("\(safeName).pdf")
+        var safeName = trimmed.isEmpty ? Self.defaultName() : trimmed
+
+        let suffix = "." + fileExtension
+        if safeName.lowercased().hasSuffix(suffix) {
+            safeName = String(safeName.dropLast(suffix.count))
+        }
+
+        let url = exportsURL.appendingPathComponent("\(safeName).\(fileExtension)")
 
         do {
             try data.write(to: url, options: .atomic)
@@ -317,5 +542,11 @@ final class DocumentStore: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return "扫描件 " + formatter.string(from: Date())
+    }
+
+    static func defaultCompilationName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return "文字汇总 " + formatter.string(from: Date())
     }
 }
