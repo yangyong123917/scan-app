@@ -6,7 +6,19 @@ import CoreImage.CIFilterBuiltins
 /// 文档扫描核心：边缘检测 + 透视校正 + 图像增强
 enum DocumentScanner {
 
-    /// 在图片中检测文档的四角。返回顺序：左上、右上、右下、左下（Core Image 坐标系，原点左下）
+    /// 完整流水线：矫正方向 → 检测四角 → 透视拉正 → 增强
+    /// 检测不到边缘时退回整图增强，保证一定有结果
+    static func process(_ image: UIImage, filter: PageFilter = .color) -> UIImage {
+        let source = ImageTools.normalized(image)
+
+        if let corners = detectDocument(in: source),
+           let straightened = perspectiveCorrect(source, corners: corners) {
+            return enhance(straightened, filter: filter) ?? straightened
+        }
+        return enhance(source, filter: filter) ?? source
+    }
+
+    /// 在图片中检测文档的四角。返回顺序：左上、右上、右下、左下（原点在左下）
     static func detectDocument(in image: UIImage) -> [CGPoint]? {
         guard let cgImage = image.cgImage else { return nil }
 
@@ -29,7 +41,7 @@ enum DocumentScanner {
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
 
-        // Vision 与 Core Image 都使用左下原点，因此直接按尺寸还原坐标即可
+        // Vision 与 Core Image 都使用左下原点，直接按尺寸还原坐标即可
         return [
             observation.topLeft,
             observation.topRight,
@@ -54,14 +66,25 @@ enum DocumentScanner {
     }
 
     /// 提升对比度并轻微锐化，让文字更清晰
-    static func enhance(_ image: UIImage) -> UIImage? {
+    static func enhance(_ image: UIImage, filter: PageFilter = .color) -> UIImage? {
         guard let input = CIImage(image: image) else { return nil }
 
         let controls = CIFilter.colorControls()
         controls.inputImage = input
-        controls.contrast = 1.2
-        controls.brightness = 0.03
-        controls.saturation = 0.2
+        switch filter {
+        case .color:
+            controls.contrast = 1.2
+            controls.brightness = 0.03
+            controls.saturation = 0.25
+        case .gray:
+            controls.contrast = 1.2
+            controls.brightness = 0.03
+            controls.saturation = 0.0
+        case .bw:
+            controls.contrast = 1.9
+            controls.brightness = 0.08
+            controls.saturation = 0.0
+        }
 
         let sharpen = CIFilter.sharpenLuminance()
         sharpen.inputImage = controls.outputImage

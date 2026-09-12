@@ -1,9 +1,45 @@
-# ScanLite · 自用扫描 App
+# ScanLite · 自用扫描 App（v2.0）
 
 > **完全没做过的话，先看 [新手安装指南.md](新手安装指南.md)** —— 里面有每一步的点击位置、界面说明和报错处理。
 
-一个纯端侧的 iOS 文档扫描工具：拍照/选图 → 自动切边校正 → 文字识别 → 导出 PDF。
+一个纯端侧的 iOS 文档扫描工具，对标「扫描全能王」的自用版。
 所有处理都在手机本地完成，**不需要服务器，不需要备案，不上架 App Store**。
+
+---
+
+## 功能
+
+### 扫描
+- **相机连续扫描**：调用苹果系统自带的文档扫描器（就是"备忘录 → 扫描文稿"里那个），
+  自动检测边缘、透视拉正、连续拍多页、单页重拍，拍完直接成为一份多页文档
+- **相册导入**：一次最多选 30 张，自动跑 Vision 边缘检测 + 透视校正 + 增强
+- **导入已有 PDF**：把外部 PDF 逐页拆成图片，之后也能排序、旋转、加水印再导出
+
+### 文件管理
+- 文档库列表：首页缩略图、名称、页数、时间
+- 搜索（按名称）、排序（时间 / 名称 / 页数）
+- 重命名、复制一份、删除
+- **多选合并**：勾选多份文档，按列表顺序拼成一份新的
+- 数据存在 App 沙盒里，开启文件共享后可以用"文件"App 直接查看
+
+### 页面编辑
+- 拖动调整页序、左滑删除单页
+- 单页旋转（左转 / 右转）
+- 三档滤镜：彩色 / 灰度 / 黑白（**非破坏性**，原图不动，只记录标记）
+- 追加页面（继续拍摄或从相册补）
+- 单页存到系统相册
+
+### PDF 输出
+- A4 排版，自动等比缩放居中
+- 页码（第 X / Y 页）
+- 文字水印（可调浓淡）
+- **手写签名**：用手指签名，转成透明 PNG 贴在每页右下角
+- **打开密码**：用 CGPDFContext 原生加密
+- **可搜索 PDF**：写入不可见的 OCR 文字层，生成后能用关键词搜索、能复制文字
+- 体积控制：页面先压成 JPEG 再嵌入，避免 PDF 里图片被无损重压导致体积暴涨
+
+### 文字识别
+- 整份文档批量 OCR（中英），结果可选中、可复制、可分享
 
 ---
 
@@ -11,112 +47,108 @@
 
 ```
 scan-app/
-├── project.yml                    # XcodeGen 工程定义（Windows 上手写这个就够了）
+├── project.yml                    # XcodeGen 工程定义（Windows 上只改这个）
 ├── ScanLite/
 │   ├── ScanLiteApp.swift          # App 入口
-│   ├── ContentView.swift          # 主界面 + 处理流程编排
-│   ├── DocumentScanner.swift      # Vision 边缘检测 + 透视校正 + 图像增强
-│   ├── TextRecognizer.swift       # Vision 端侧 OCR（中英）
-│   └── PDFExporter.swift          # 图片合成 PDF
+│   ├── Core/
+│   │   ├── Models.swift           # ScanDocument / ScanPage / PageFilter
+│   │   ├── DocumentStore.swift    # 沙盒读写、增删改查、缓存、导出
+│   │   ├── ImageTools.swift       # 方向矫正、缩放、旋转、滤镜、缩略图
+│   │   ├── DocumentScanner.swift  # Vision 边缘检测 + 透视校正 + 增强
+│   │   ├── TextRecognizer.swift   # Vision 端侧 OCR（中英，含行坐标）
+│   │   └── PDFBuilder.swift       # A4 合成 / 水印 / 页码 / 签名 / 加密 / 文字层 + PDF 导入
+│   └── Views/
+│       ├── LibraryView.swift      # 文件库首页
+│       ├── DocumentDetailView.swift # 页列表、排序、OCR
+│       ├── PageViewerView.swift   # 单页查看与编辑
+│       ├── ScannerViews.swift     # 系统文档扫描器封装
+│       ├── ExportSheet.swift      # 导出设置
+│       └── SignaturePadView.swift # 手写签名（PencilKit）
 └── .github/workflows/build.yml    # GitHub Actions 自动构建未签名 IPA
 ```
 
 `.xcodeproj` 不提交到仓库，由 GitHub Actions 里的 `xcodegen generate` 现场生成——
 所以你完全不需要 Mac，也不需要手写 Xcode 工程文件。
 
----
-
-## 第一步：上传到 GitHub
-
-1. 注册/登录 GitHub，右上角 **New repository**
-2. 仓库名随意，比如 `scanlite`
-3. 可见性选 **Public**（重要：公开仓库的 macOS 构建免费，私有仓库会消耗额度）
-4. 创建后，把 `scan-app` 目录里的所有内容推上去：
-
-```bash
-cd scan-app
-git init
-git add .
-git commit -m "init: 扫描 App"
-git branch -M main
-git remote add origin https://github.com/<你的用户名>/scanlite.git
-git push -u origin main
-```
-
-也可以用网页版直接拖拽上传（注意 `.github/workflows/build.yml` 必须保持这个目录结构）。
+**技术栈**：SwiftUI + Vision（边缘检测 / OCR）+ VisionKit（文档扫描器）+ Core Image（滤镜）
++ Core Graphics（PDF 生成与加密）+ PDFKit（PDF 导入）+ PencilKit（签名）。
+全部是苹果原生框架，零第三方依赖，零服务器成本。
 
 ---
 
-## 第二步：等待构建，下载 IPA
+## 上传与构建
 
-1. 推送后打开仓库的 **Actions** 标签页
-2. 会看到一条 `Build unsigned IPA` 的任务在运行，大约 3–6 分钟
-3. 变成绿色对勾后，点进去，页面底部 **Artifacts** 区域
-4. 下载 `ScanLite-unsigned-ipa`，解压得到 `ScanLite-unsigned.ipa`
+1. 在 GitHub 新建仓库，可见性选 **Public**
+   （公开仓库的 macOS 构建免费，私有仓库按 10 倍消耗额度）
+2. 用 GitHub Desktop 把 `scan-app` 文件夹加入并 Publish
+3. 打开仓库的 **Actions** 标签页，等 `Build unsigned IPA` 跑完（约 3–6 分钟）
+4. 点进绿色对勾的任务，页面**最底部**的 **Artifacts** 下载 `ScanLite-unsigned-ipa`
+5. 解压得到 `ScanLite-unsigned.ipa`
 
-> 如果构建失败，点开失败的步骤看日志。最常见的原因是 runner 镜像名变了，
-> 把 `build.yml` 里的 `macos-latest` 改成 `macos-15` 或 `macos-14` 再试。
+> 构建失败时最常见的原因是 runner 镜像名变了，
+> 把 `build.yml` 里的 `macos-latest` 改成 `macos-15` 再试。
 
 ---
 
-## 第三步：Windows 上签名安装
+## Windows 上签名安装
 
-### 准备环境
-
-| 软件 | 用途 | 下载 |
+| 软件 | 用途 | 来源 |
 |---|---|---|
-| Apple Devices 或 iTunes | 提供 iPhone 驱动 | 微软商店搜 "Apple Devices" |
+| Apple Devices | 提供 iPhone 驱动 | 微软商店搜 "Apple Devices"（发布者须是 Apple Inc.） |
 | iCloud | 补全驱动组件 | 微软商店搜 "iCloud" |
 | Sideloadly | 用 Apple ID 签名 IPA | https://sideloadly.io |
 
-### 安装步骤
-
-1. 用数据线连接 iPhone，手机上点 **信任此电脑**
-2. 打开 Sideloadly，把 `ScanLite-unsigned.ipa` 拖进窗口
-3. **Apple ID** 填你的 Apple ID（建议用一个不绑重要数据的账号）
-4. 如果提示 bundle id 冲突，勾选 **Change Bundle ID** 让它自动改一个唯一的
-5. 点 **Start**，按提示输入 Apple ID 密码
-6. 安装完成后，手机上进入：
-   **设置 → 通用 → VPN 与设备管理 → 开发者 App → 信任你的 Apple ID**
-7. 回到桌面，App 就能打开了
+1. 数据线连 iPhone，手机上点 **信任此电脑**
+2. 打开 Sideloadly，把 IPA 拖到左上角的 IPA 大图标上
+3. **Apple ID** 填账号邮箱
+4. 展开 **Advanced Options**：
+   - 想要**覆盖升级**（保留 App 内数据）→ **取消勾选** `Use automatic bundle ID`，
+     在输入框里填一个固定的独特 ID，比如 `com.你的名字.scanlite`
+   - 不在乎数据、只想装上 → 保持勾选 `Use automatic bundle ID`，
+     但注意每次装都是新的随机 ID，会**多出一个图标**
+5. 点 **Start** → 弹窗输密码（开了双重认证要用 App 专用密码）
+6. iPhone 上：**设置 → 通用 → VPN 与设备管理 → 信任你的 Apple ID**
+7. iOS 16 以上首次安装还需 **设置 → 隐私与安全性 → 开发者模式 → 打开 → 重启手机**
 
 ---
 
 ## 关键问题：7 天过期
 
-用免费 Apple ID 签名，证书只有 **7 天有效期**。过期后 App 打不开（图标变灰），必须重新签名安装。
+免费 Apple ID 签名只有 **7 天有效期**，过期后 App 打不开（图标变灰）。
 
-两种应对方式：
-
-**方式 A：手动续签（简单）**
-每 7 天重连一次电脑，用 Sideloadly 重装一遍。适合偶尔用。
+**方式 A：手动续签** —— 每 7 天用 Sideloadly 重装一遍。
 
 **方式 B：AltStore 自动续签（推荐）**
-
 1. 下载 **AltServer for Windows**：https://altstore.io
-2. 把它安装的 **AltStore** 通过数据线装到 iPhone 上（AltServer 菜单 → Install AltStore）
-3. 手机上打开 AltStore，用同一个 Apple ID 登录
-4. 在 AltStore 的 **Settings** 里，把我的 App 的 **Background Refresh** 打开
-5. 之后只要 iPhone 和电脑在**同一个 WiFi**下，AltStore 会自动在后台续签，你不用管
-
-AltStore 也支持直接安装 IPA，可以完全替代 Sideloadly。
+2. 用数据线把 AltStore 装到 iPhone（AltServer 菜单 → Install AltStore）
+3. 手机上打开 AltStore，用**同一个 Apple ID** 登录
+4. Settings 里把 **Background Refresh** 打开
+5. 之后只要 iPhone 和电脑在同一个 WiFi 下就会自动续签
 
 ---
 
 ## 常见问题
 
 **Q：Sideloadly 报 "bundle identifier is not available"**
-勾选 Sideloadly 界面上的 `Change Bundle ID`，或者修改 `project.yml` 里的
-`PRODUCT_BUNDLE_IDENTIFIER` 为更独特的名字（比如加上你的名字），重新构建。
+v0.60 里对应的是 `Use automatic bundle ID`（默认已勾选）。
+还报错就取消勾选，手工填 `com.你的名字.scanlite`。
 
 **Q：找不到"信任开发者"的入口**
-iOS 16 以上路径是 **设置 → 通用 → VPN 与设备管理**。必须先用数据线连过一次电脑才会出现。
+iOS 16 以上路径是 **设置 → 通用 → VPN 与设备管理**，且必须先用数据线连过一次电脑。
+
+**Q：App 装好但打不开，提示开发者模式**
+**设置 → 隐私与安全性 →（滑到最底部）开发者模式 → 打开 → 重启手机 → 再点一次 Start**。
+
+**Q：升级新版后数据丢了**
+因为换了 bundle ID，系统会把新 App 当成另一个应用。
+以后升级请固定同一个 bundle ID，安装时会覆盖升级，数据保留。
+（另外：**删除 App 会连带删掉里面所有扫描件**，重要文件先导出 PDF。）
 
 **Q：免费账号有什么限制**
-同时最多只能有 3 个自签 App，证书 7 天有效，需要定期续签。
+同时最多 3 个自签 App，证书 7 天有效，需要定期续签。
 
 **Q：以后想上架 App Store 怎么办**
-需要：付费开发者账号（$99/年）+ 中国大陆 ICP/App 备案 + 软件著作权。
+需要付费开发者账号（$99/年）+ 中国大陆 ICP/App 备案 + 软件著作权。
 代码本身不用改，`project.yml` 里把签名相关设置去掉即可。
 
 **Q：想改 App 名字 / 图标**

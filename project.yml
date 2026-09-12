@@ -7,8 +7,8 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "2.0"
+    CURRENT_PROJECT_VERSION: "2"
     SWIFT_VERSION: "5.0"
 
 schemes:
@@ -33,13 +33,16 @@ targets:
       path: ScanLite/Info.plist
       properties:
         CFBundleDisplayName: 扫描小工具
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "2.0"
+        CFBundleVersion: "2"
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         NSCameraUsageDescription: 需要使用相机拍摄待扫描的文档
-        NSPhotoLibraryUsageDescription: 需要访问相册以选择待扫描的文档图片
+        NSPhotoLibraryUsageDescription: 需要访问相册以导入待扫描的图片
+        NSPhotoLibraryAddUsageDescription: 需要把扫描结果保存到相册
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     settings:
