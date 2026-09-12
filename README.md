@@ -1,4 +1,4 @@
-# ScanLite · 自用扫描 App（v2.0）
+# ScanLite · 自用扫描 App（v2.1）
 
 > **完全没做过的话，先看 [新手安装指南.md](新手安装指南.md)** —— 里面有每一步的点击位置、界面说明和报错处理。
 
@@ -50,6 +50,9 @@ scan-app/
 ├── project.yml                    # XcodeGen 工程定义（Windows 上只改这个）
 ├── ScanLite/
 │   ├── ScanLiteApp.swift          # App 入口
+│   ├── Assets.xcassets/
+│   │   └── AppIcon.appiconset/
+│   │       └── AppIcon-1024.png   # App 图标（1024×1024，无 alpha）
 │   ├── Core/
 │   │   ├── Models.swift           # ScanDocument / ScanPage / PageFilter
 │   │   ├── DocumentStore.swift    # 沙盒读写、增删改查、缓存、导出
@@ -64,6 +67,8 @@ scan-app/
 │       ├── ScannerViews.swift     # 系统文档扫描器封装
 │       ├── ExportSheet.swift      # 导出设置
 │       └── SignaturePadView.swift # 手写签名（PencilKit）
+├── tools/
+│   └── make_app_icon.py           # 图标生成脚本（纯标准库，改颜色后重跑即可）
 └── .github/workflows/build.yml    # GitHub Actions 自动构建未签名 IPA
 ```
 
@@ -81,7 +86,7 @@ scan-app/
 1. 在 GitHub 新建仓库，可见性选 **Public**
    （公开仓库的 macOS 构建免费，私有仓库按 10 倍消耗额度）
 2. 用 GitHub Desktop 把 `scan-app` 文件夹加入并 Publish
-3. 打开仓库的 **Actions** 标签页，等 `Build unsigned IPA` 跑完（约 3–6 分钟）
+3. 打开仓库的 **Actions** 标签页，等 `Build unsigned IPA` 跑完（这个工程约 1 分钟）
 4. 点进绿色对勾的任务，页面**最底部**的 **Artifacts** 下载 `ScanLite-unsigned-ipa`
 5. 解压得到 `ScanLite-unsigned.ipa`
 
@@ -151,7 +156,15 @@ iOS 16 以上路径是 **设置 → 通用 → VPN 与设备管理**，且必须
 需要付费开发者账号（$99/年）+ 中国大陆 ICP/App 备案 + 软件著作权。
 代码本身不用改，`project.yml` 里把签名相关设置去掉即可。
 
+**Q：升级后桌面图标还是空白方块**
+iOS 会缓存 App 图标。先长按图标删除 App，再重新装一次就正常了。
+
 **Q：想改 App 名字 / 图标**
 - 名字：改 `project.yml` 里的 `CFBundleDisplayName`
-- 图标：把 `AppIcon.appiconset` 放进 `ScanLite/Assets.xcassets/`，
-  并在 `project.yml` 里设置 `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon`
+- 图标：直接替换 `ScanLite/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`
+  （必须 1024×1024、PNG、**不能带透明通道**、**不要自己画圆角**），
+  或在 `tools/make_app_icon.py` 里改配色后重跑脚本。
+
+**Q：图标为什么是空白的**
+Xcode 只会使用 `ASSETCATALOG_COMPILER_APPICON_NAME` 指定名字的图标资源集。
+没有这个设置、或资源集里没有 1024×1024 的图，iOS 就显示系统默认的灰白方块。
