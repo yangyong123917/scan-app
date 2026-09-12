@@ -1,4 +1,4 @@
-# ScanLite · 自用扫描 App（v2.2）
+# ScanLite · 自用扫描 App（v2.2.1）
 
 > **完全没做过的话，先看 [新手安装指南.md](新手安装指南.md)** —— 里面有每一步的点击位置、界面说明和报错处理。
 
@@ -187,6 +187,16 @@ iOS 会缓存 App 图标。先长按图标删除 App，再重新装一次就正�
 **Q：想改 App 名字 / 图标**
 - 名字：改 `project.yml` 里的 `CFBundleDisplayName`
 - 图标：直接替换 `ScanLite/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`
+
+**Q：云端构建报 `exit code 65` / `has no member` 这类错**
+说明是 Swift 编译错误，日志里 `error:` 开头的行就是原因。
+从 2.2.1 起这些错误会自动汇总到运行页面顶部的 Annotations 区块，方便直接复制。
+
+**Q：为什么 `DocumentStore.swift` 里的遍历排序要手写，不用 `move(fromOffsets:toOffset:)`**
+因为那个方法是 **SwiftUI 框架**给集合加的扩展（Apple 文档把它归在 SwiftUI 下），
+而该文件只 `import Foundation` / `UIKit`。Swift 要求扩展方法必须在**调用它的文件**里
+导入相应框架，否则报 `has no member 'move'`。2.2 版就是踩了这个坑，2.2.1 改为手写实现。
+同类需要注意的还有 `remove(atOffsets:)`。
   （必须 1024×1024、PNG、**不能带透明通道**、**不要自己画圆角**），
   或在 `tools/make_app_icon.py` 里改配色后重跑脚本。
 

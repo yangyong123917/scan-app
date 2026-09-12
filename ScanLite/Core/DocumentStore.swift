@@ -345,9 +345,32 @@ final class DocumentStore: ObservableObject {
         persistCompilations()
     }
 
+    /// 拖动排序。
+    ///
+    /// 注意：不能写 `items.move(fromOffsets:toOffset:)` —— 那个方法是 SwiftUI
+    /// 框架给集合加的扩展，本文件没有（也不该）导入 SwiftUI，直接调用会编译不过。
+    /// 所以这里手写一遍，语义与 SwiftUI 的一致：先把要移动的元素摘出来，
+    /// 再按「目标位置减去它前面被摘掉的个数」算出插入点。
     func moveItems(from offsets: IndexSet, to destination: Int, in compilationID: UUID) {
         guard let index = compilations.firstIndex(where: { $0.id == compilationID }) else { return }
-        compilations[index].items.move(fromOffsets: offsets, toOffset: destination)
+
+        var items = compilations[index].items
+        let ascending = offsets.sorted()
+
+        let moving = ascending.compactMap { position -> CompilationItem? in
+            items.indices.contains(position) ? items[position] : nil
+        }
+        guard !moving.isEmpty else { return }
+
+        for position in ascending.reversed() where items.indices.contains(position) {
+            items.remove(at: position)
+        }
+
+        let removedBefore = ascending.filter { $0 < destination }.count
+        let target = max(0, min(items.count, destination - removedBefore))
+        items.insert(contentsOf: moving, at: target)
+
+        compilations[index].items = items
         compilations[index].updatedAt = Date()
         persistCompilations()
     }

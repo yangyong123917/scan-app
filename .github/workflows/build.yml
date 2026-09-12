@@ -25,6 +25,7 @@ jobs:
 
       - name: Build app (unsigned)
         run: |
+          set -o pipefail
           xcodebuild \
             -project ScanLite.xcodeproj \
             -scheme ScanLite \
@@ -34,7 +35,14 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee build.log
+
+      - name: Show compile errors
+        if: failure()
+        run: |
+          grep -E "error:" build.log | head -40 | while read -r line; do echo "::error::$line"; done || true
+          echo "----- 完整日志中的错误行 -----"
+          grep -nE "error:" build.log | head -40 || true
 
       - name: Package into IPA
         run: |

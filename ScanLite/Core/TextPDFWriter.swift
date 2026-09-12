@@ -46,21 +46,24 @@ enum TextPDFWriter {
         var pageOpen = false
 
         func openPage() {
-            var box = CGRect(origin: .zero, size: pageSize)
+            var box = CGRect(origin: .zero, size: Self.pageSize)
             context.beginPage(mediaBox: &box)
-            cursor = pageSize.height - margin
+            cursor = Self.pageSize.height - Self.margin
             pageOpen = true
         }
 
         func closePage() {
             guard pageOpen else { return }
             if showPageNumbers {
-                let footer = layout("第 \(pageNumber) 页", font: metaFont, color: .gray, width: contentWidth)
+                let footer = Self.layout("第 \(pageNumber) 页",
+                                         font: Self.metaFont,
+                                         color: .gray,
+                                         width: Self.contentWidth)
                 if let first = footer.first {
                     let width = CGFloat(CTLineGetTypographicBounds(first.line, nil, nil, nil))
-                    draw(first.line,
-                         at: CGPoint(x: (pageSize.width - width) / 2, y: margin * 0.5),
-                         in: context)
+                    Self.draw(first.line,
+                              at: CGPoint(x: (Self.pageSize.width - width) / 2, y: Self.margin * 0.5),
+                              in: context)
                 }
             }
             context.endPage()
@@ -71,13 +74,13 @@ enum TextPDFWriter {
         /// 写一段。空字符串表示空行，照样占一行高度
         func write(_ text: String, font: UIFont, color: UIColor, gapAfter: CGFloat = 0) {
             if text.isEmpty {
-                let height = font.lineHeight * lineSpacing
-                if cursor - height < margin { closePage(); openPage() }
+                let height = font.lineHeight * Self.lineSpacing
+                if cursor - height < Self.margin { closePage(); openPage() }
                 cursor -= height
             } else {
-                for laid in layout(text, font: font, color: color, width: contentWidth) {
-                    if cursor - laid.height < margin { closePage(); openPage() }
-                    draw(laid.line, at: CGPoint(x: margin, y: cursor - laid.ascent), in: context)
+                for laid in Self.layout(text, font: font, color: color, width: Self.contentWidth) {
+                    if cursor - laid.height < Self.margin { closePage(); openPage() }
+                    Self.draw(laid.line, at: CGPoint(x: Self.margin, y: cursor - laid.ascent), in: context)
                     cursor -= laid.height
                 }
             }
